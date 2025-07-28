@@ -1,4 +1,5 @@
 import pandas as pd
+print("test")
 import requests 
 from datetime import datetime, timedelta
 import time
@@ -516,5 +517,8 @@ finally:
     else:
         print(f"{len(df_events)} événements importants trouvés après filtrage:")
         print(df_events)
-    
     driver.quit()
+print(devises_fortes)
+print(devises_faibles)
+print(f'acheter {df_final.iloc[0, 0]}/{df_final.iloc[-1, 0]}')
+print(df_complet)

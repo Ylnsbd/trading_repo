@@ -364,7 +364,6 @@ try:
         driver.execute_script("arguments[0].click();", save_button)
         time.sleep(4)
         print("Filtres de pays appliqués")
-        
         # Capture d'écran pour vérifier
         driver.save_screenshot("countries_filtered.png")
         

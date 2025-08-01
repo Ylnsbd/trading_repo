@@ -521,3 +521,254 @@ print(devises_fortes)
 print(devises_faibles)
 print(f'acheter {df_final.iloc[0, 0]}/{df_final.iloc[-1, 0]}')
 print(df_complet)
+
+print("\n--- Calcul du score de journée par devise ---\n")
+def scrape_trading_economics_stream():
+    print("\n--- Récupération du flux d'actualités Trading Economics ---\n")
+    country_to_currency = {
+        'United States': 'USD',
+        'US': 'USD',
+        'USA': 'USD',
+        'U.S.': 'USD',
+        'U.S': 'USD',
+        'America': 'USD',
+        'Fed': 'USD',
+        'France': 'EUR',
+        'Germany': 'EUR',
+        'Italy': 'EUR',
+        'Spain': 'EUR',
+        'Netherlands': 'EUR',
+        'Belgium': 'EUR',
+        'Euro Area': 'EUR',
+        'Eurozone': 'EUR',
+        'Europe': 'EUR',
+        'EU': 'EUR',
+        'ECB': 'EUR',
+        'Japan': 'JPY',
+        'Tokyo': 'JPY',
+        'BOJ': 'JPY',
+        'United Kingdom': 'GBP',
+        'UK': 'GBP',
+        'Britain': 'GBP',
+        'England': 'GBP',
+        'BOE': 'GBP',
+        'Canada': 'CAD',
+        'Ottawa': 'CAD',
+        'BOC': 'CAD'
+    }
+    
+    options = webdriver.ChromeOptions()
+    options.add_argument("--start-maximized")
+    options.binary_location = "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
+    options.add_argument("--disable-popup-blocking")
+    options.add_argument("--disable-notifications")
+    
+    driver = webdriver.Chrome(
+        service=webdriver.ChromeService(ChromeDriverManager().install()),
+        options=options
+    )
+    news_data = []
+    try:
+        driver.get("https://tradingeconomics.com/stream?i=economy")
+        print("Page ouverte, attente du chargement...")
+        WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.CLASS_NAME, "te-stream-item"))
+        )
+        max_scrolls = 50
+        scrolls_without_new_content = 0
+        last_item_count = 0
+        hr = 0
+
+        for scroll in range(max_scrolls):
+            driver.execute_script("window.scrollBy(0, 1000);")
+            time.sleep(1.2)
+            
+            elements = driver.find_elements(By.CSS_SELECTOR, "li.list-group-item.te-stream-item.indc_news_stream")
+            if len(elements) == last_item_count:
+                scrolls_without_new_content += 1
+                if scrolls_without_new_content >= 5:
+                    print("Fin du chargement - aucun nouvel élément")
+                    break
+            else:
+                scrolls_without_new_content = 0
+                last_item_count = len(elements)
+            if elements and scroll % 3 == 0:
+                try:
+                    time_element = elements[-1].find_element(By.CSS_SELECTOR, "small[style*='color:#808080']")
+                    time_ago = time_element.text.strip()
+                    if "hours" in time_ago:
+                        current_hr = int(time_ago.split()[0])
+                        hr = max(hr, current_hr)
+                        print(f"Article le plus ancien: {hr} heures")
+                        if hr > 24:
+                            print("Atteinte d'articles de plus de 24h")
+                            break
+                except Exception as e:
+                    print(f"Erreur lors de la vérification du temps: {e}")
+        try:
+            cookie_button = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, ".fc-button-label, .fc-button.fc-cta-consent"))
+            )
+            cookie_button.click()
+            time.sleep(1)
+            print("Cookies acceptés")
+        except Exception as e:
+            print("Pas de popup de cookies ou erreur:", e)
+        news_items = driver.find_elements(By.CSS_SELECTOR, "li.list-group-item.te-stream-item.indc_news_stream")
+        news_items2 = driver.find_elements(By.CSS_SELECTOR, "li.list-group-item.te-stream-item.indc_news_stream.te-stream-item-2")
+        print(f"Nombre d'événements trouvés: {len(news_items)}")
+        print(f"Nombre d'événements trouvés (type 2): {len(news_items2)}")
+
+        for item in news_items + news_items2:
+            try:
+                country_element = item.find_element(By.CSS_SELECTOR, ".te-stream-country")
+                country = country_element.text.strip()
+                category_element = item.find_element(By.CSS_SELECTOR, ".te-stream-category")
+                category = category_element.text.strip()
+                description_element = item.find_element(By.CSS_SELECTOR, ".te-stream-item-description")
+                description = description_element.text.strip()
+                time_element = item.find_element(By.CSS_SELECTOR, "small[style*='color:#808080']")
+                time_ago = time_element.text.strip()
+                title_element = item.find_element(By.CSS_SELECTOR, ".te-stream-title")
+                title = title_element.text.strip()
+                currency = None
+                country_text = country.lower()
+                print(f"Tentative de correspondance pour: '{country_text}'")
+                for country_name, currency_code in country_to_currency.items():
+                    if country_name.lower() in country_text or country_text in country_name.lower():
+                        currency = currency_code
+                        break
+                if country == 'France' or country == 'Germany' or country == 'Italy' or country == 'Spain' or country == 'Netherlands' or country == 'Belgium':
+                    impact_multiplier = 0.5
+                else:
+                    impact_multiplier = 1.0
+                if not currency:
+                    print(f"⚠️ Pays non reconnu: '{country}' - Titre: {title[:30]}...")
+                
+                if "hours" in time_ago:
+                    hours_ago = int(time_ago.split()[0])
+                    if hours_ago > 24:
+                        print(f"Événement ignoré (trop ancien): {title} ({country})")
+                        continue
+
+                if currency:
+                    news_data.append({
+                        'country': country,
+                        'currency': currency,
+                        'category': category,
+                        'title': title,
+                        'description': description,
+                        'time_ago': time_ago,
+                        'impact_multiplier': impact_multiplier,
+                        'full_text': f"{title}. {description}"
+                    })
+                    print(f"Événement ajouté: {title} ({country} / {currency})")
+                else:
+                    print(f"Événement ignoré (pays non suivi): {title} ({country})")
+                
+            except Exception as e:
+                print(f"Erreur lors de l'extraction d'un événement: {e}")
+                continue
+        
+    except Exception as e:
+        print(f"Erreur principale: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    finally:
+        driver.quit()
+    df_te_news = pd.DataFrame(news_data)
+    
+    if df_te_news.empty:
+        print("Aucun événement récupéré!")
+    else:
+        print(f"\n{len(df_te_news)} événements importants trouvés:")
+        print(df_te_news[['currency', 'title', 'time_ago']])
+    
+    return df_te_news
+
+def analyze_te_sentiment(df_news):
+    print("\n--- Analyse de sentiment des données Trading Economics ---\n")
+    
+    if df_news.empty:
+        print("Aucun événement à analyser!")
+        return pd.DataFrame()
+    print("Chargement du modèle FinBERT...")
+    tokenizer_te = AutoTokenizer.from_pretrained("ProsusAI/finbert")
+    model_te = AutoModelForSequenceClassification.from_pretrained("ProsusAI/finbert")
+    news_by_currency = {dev: [] for dev in ["EUR", "USD", "CAD", "JPY", "GBP"]}
+    for _, row in df_news.iterrows():
+        if row["currency"] in news_by_currency:
+            news_by_currency[row["currency"]].append({
+                'text': row["full_text"],
+                'impact': row["impact_multiplier"]
+            })
+
+    sentiment_results = {}
+    for currency, texts in news_by_currency.items():
+        print(f"\nAnalyse des événements pour {currency}: {len(texts)} événements")
+        
+        if not texts:
+            print(f"  Aucun événement trouvé pour {currency}")
+            continue
+        positive_count = 0
+        negative_count = 0
+        neutral_count = 0
+        confidence_sum = 0
+        
+        for item in texts:
+            if isinstance(item, dict):
+                text = item['text']
+                impact_multiplier = float(item['impact'])
+            else:
+                text = item
+                impact_multiplier = 1.0
+                
+            inputs = tokenizer_te(text, return_tensors="pt", truncation=True, max_length=512)
+            with torch.no_grad():
+                outputs = model_te(**inputs)
+            
+            probs = F.softmax(outputs.logits, dim=1)
+            sentiment_labels = ["negative", "neutral", "positive"]
+            sentiment_scores = {label: float(prob) for label, prob in zip(sentiment_labels, probs[0])}
+            sentiment = max(sentiment_scores, key=sentiment_scores.get)
+            confidence = float(sentiment_scores[sentiment])
+            if sentiment == "positive":
+                positive_count += 1
+                confidence_sum += confidence * impact_multiplier
+            elif sentiment == "negative":
+                negative_count += 1
+                confidence_sum -= confidence * impact_multiplier
+            else:
+                neutral_count += 1
+            print(f"  - Événement: {text[:50]}... | Sentiment: {sentiment} ({confidence:.2f}) [Impact: {impact_multiplier}]")
+        total_count = positive_count + negative_count + neutral_count
+        avg_confidence = abs(confidence_sum / total_count) if total_count > 0 else 0
+        sentiment_score = confidence_sum / total_count if total_count > 0 else 0
+        
+        sentiment_results[currency] = {
+            'total_events': total_count,
+            'positive': positive_count,
+            'negative': negative_count,
+            'neutral': neutral_count,
+            'avg_confidence': avg_confidence,
+            'score_journee': sentiment_score 
+        }
+    df_scores_journee = pd.DataFrame([
+        {
+            'devise': currency,
+            'nb_evenements': data['total_events'],
+            'positifs': data['positive'],
+            'negatifs': data['negative'],
+            'neutres': data['neutral'],
+            'confiance': data['avg_confidence'],
+            'score_journee': data['score_journee']
+        }
+        for currency, data in sentiment_results.items()
+    ])
+    print("\n=== Scores de sentiment par devise (Trading Economics) ===")
+    print(df_scores_journee)
+    
+    return df_scores_journee
+te_news = scrape_trading_economics_stream()
+df_scores_journee = analyze_te_sentiment(te_news)
